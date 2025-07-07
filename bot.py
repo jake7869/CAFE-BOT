@@ -1,8 +1,7 @@
 
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 from discord.ui import View, Button, Select
-
 import os
 
 intents = discord.Intents.default()
@@ -44,10 +43,11 @@ def build_stock_display():
 async def update_panel():
     global panel_message
     channel = bot.get_channel(PANEL_CHANNEL_ID)
+    view = MainView()
     if panel_message is None:
-        panel_message = await channel.send(build_stock_display(), view=MainView())
+        panel_message = await channel.send(build_stock_display(), view=view)
     else:
-        await panel_message.edit(content=build_stock_display(), view=MainView())
+        await panel_message.edit(content=build_stock_display(), view=view)
 
 async def update_leaderboard():
     global leaderboard_message
@@ -69,7 +69,8 @@ class MainView(View):
         self.add_item(AddDrink())
         self.add_item(RemoveFood())
         self.add_item(RemoveDrink())
-        self.add_item(MarkPaidDropdown())
+        if user_data:  # only add dropdown if there's user data
+            self.add_item(MarkPaidDropdown())
 
 class AddFood(Button):
     def __init__(self):
