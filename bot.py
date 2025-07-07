@@ -9,23 +9,22 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Configuration
+# Config
 PANEL_CHANNEL_ID = 1391785062701469808
 LEADERBOARD_CHANNEL_ID = 1391785179240206336
 LOG_CHANNEL_ID = 1391784873038975086
 ADMIN_ROLE_ID = 1391785348262264925
 
-# State storage
+# State
 user_data = {}
 total_food = 0
 total_drinks = 0
 panel_message = None
 leaderboard_message = None
 
-# Helper functions
+# Helpers
 def get_owed(food, drink):
-    total_items = food + drink
-    return (total_items // 50) * 100000  # 100k per 50 items
+    return ((food + drink) // 50) * 100000
 
 def build_leaderboard():
     if not user_data:
@@ -34,7 +33,9 @@ def build_leaderboard():
     sorted_data = sorted(user_data.items(), key=lambda x: (x[1]['food'] + x[1]['drink']), reverse=True)
     for user_id, data in sorted_data:
         owed = get_owed(data['food'], data['drink']) - data['paid']
-        lines.append(f"<@{user_id}> - 🍔 {data['food']} | 🧃 {data['drink']} | 💰 Owed: £{owed:,} | ✅ Paid: £{data['paid']:,}")
+        user = bot.get_user(user_id)
+        name = user.display_name if user else str(user_id)
+        lines.append(f"**{name}** - 🍔 {data['food']} | 🧃 {data['drink']} | 💰 Owed: £{owed:,} | ✅ Paid: £{data['paid']:,}")
     return "\n".join(lines)
 
 def build_stock_display():
@@ -58,10 +59,10 @@ async def update_leaderboard():
         await leaderboard_message.edit(content=build_leaderboard())
 
 async def log_action(message):
-    log_channel = bot.get_channel(LOG_CHANNEL_ID)
-    await log_channel.send(message)
+    channel = bot.get_channel(LOG_CHANNEL_ID)
+    await channel.send(message)
 
-# UI View and Buttons
+# Buttons & Views
 class MainView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -69,8 +70,9 @@ class MainView(View):
         self.add_item(AddDrink())
         self.add_item(RemoveFood())
         self.add_item(RemoveDrink())
-        if user_data:  # only add dropdown if there's user data
+        if user_data:
             self.add_item(MarkPaidDropdown())
+        self.add_item(ResetAllData())
 
 class AddFood(Button):
     def __init__(self):
@@ -78,13 +80,13 @@ class AddFood(Button):
 
     async def callback(self, interaction: discord.Interaction):
         global total_food
-        user_id = interaction.user.id
-        user_data.setdefault(user_id, {'food': 0, 'drink': 0, 'paid': 0})
-        user_data[user_id]['food'] += 50
+        uid = interaction.user.id
+        user_data.setdefault(uid, {'food': 0, 'drink': 0, 'paid': 0})
+        user_data[uid]['food'] += 50
         total_food += 50
         await update_panel()
         await update_leaderboard()
-        await log_action(f"🍔 {interaction.user.mention} added 50 Food. Total Food: {total_food}")
+        await log_action(f"🍔 {interaction.user.mention} added 50 Food. Total: {total_food}")
         await interaction.response.defer()
 
 class AddDrink(Button):
@@ -93,13 +95,13 @@ class AddDrink(Button):
 
     async def callback(self, interaction: discord.Interaction):
         global total_drinks
-        user_id = interaction.user.id
-        user_data.setdefault(user_id, {'food': 0, 'drink': 0, 'paid': 0})
-        user_data[user_id]['drink'] += 50
+        uid = interaction.user.id
+        user_data.setdefault(uid, {'food': 0, 'drink': 0, 'paid': 0})
+        user_data[uid]['drink'] += 50
         total_drinks += 50
         await update_panel()
         await update_leaderboard()
-        await log_action(f"🧃 {interaction.user.mention} added 50 Drink. Total Drinks: {total_drinks}")
+        await log_action(f"🧃 {interaction.user.mention} added 50 Drink. Total: {total_drinks}")
         await interaction.response.defer()
 
 class RemoveFood(Button):
@@ -107,13 +109,12 @@ class RemoveFood(Button):
         super().__init__(label="Remove 50 Food", style=discord.ButtonStyle.red)
 
     async def callback(self, interaction: discord.Interaction):
-        if ADMIN_ROLE_ID not in [role.id for role in interaction.user.roles]:
-            await interaction.response.send_message("You don't have permission.", ephemeral=True)
-            return
+        if ADMIN_ROLE_ID not in [r.id for r in interaction.user.roles]:
+            return await interaction.response.send_message("❌ No permission.", ephemeral=True)
         global total_food
         total_food = max(0, total_food - 50)
         await update_panel()
-        await log_action(f"❌ {interaction.user.mention} removed 50 Food. Total Food: {total_food}")
+        await log_action(f"❌ {interaction.user.mention} removed 50 Food. Total: {total_food}")
         await interaction.response.defer()
 
 class RemoveDrink(Button):
@@ -121,38 +122,54 @@ class RemoveDrink(Button):
         super().__init__(label="Remove 50 Drink", style=discord.ButtonStyle.red)
 
     async def callback(self, interaction: discord.Interaction):
-        if ADMIN_ROLE_ID not in [role.id for role in interaction.user.roles]:
-            await interaction.response.send_message("You don't have permission.", ephemeral=True)
-            return
+        if ADMIN_ROLE_ID not in [r.id for r in interaction.user.roles]:
+            return await interaction.response.send_message("❌ No permission.", ephemeral=True)
         global total_drinks
         total_drinks = max(0, total_drinks - 50)
         await update_panel()
-        await log_action(f"❌ {interaction.user.mention} removed 50 Drink. Total Drinks: {total_drinks}")
+        await log_action(f"❌ {interaction.user.mention} removed 50 Drink. Total: {total_drinks}")
         await interaction.response.defer()
 
 class MarkPaidDropdown(Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label=str(user_id), description="Mark user as paid")
-            for user_id in user_data.keys()
+            discord.SelectOption(
+                label=bot.get_user(uid).display_name if bot.get_user(uid) else str(uid),
+                value=str(uid)
+            ) for uid in user_data
         ]
         super().__init__(placeholder="Mark user as Paid", options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        if ADMIN_ROLE_ID not in [role.id for role in interaction.user.roles]:
-            await interaction.response.send_message("You don't have permission.", ephemeral=True)
-            return
-        user_id = int(self.values[0])
-        if user_id in user_data:
-            owed = get_owed(user_data[user_id]['food'], user_data[user_id]['drink'])
-            user_data[user_id]['paid'] += owed
+        if ADMIN_ROLE_ID not in [r.id for r in interaction.user.roles]:
+            return await interaction.response.send_message("❌ No permission.", ephemeral=True)
+        uid = int(self.values[0])
+        if uid in user_data:
+            owed = get_owed(user_data[uid]['food'], user_data[uid]['drink'])
+            user_data[uid]['paid'] += owed
             await update_leaderboard()
-            await log_action(f"✅ {interaction.user.mention} marked <@{user_id}> as paid (£{owed:,}).")
+            await log_action(f"✅ {interaction.user.mention} marked <@{uid}> as paid (£{owed:,}).")
         await interaction.response.defer()
+
+class ResetAllData(Button):
+    def __init__(self):
+        super().__init__(label="Reset All Data", style=discord.ButtonStyle.grey)
+
+    async def callback(self, interaction: discord.Interaction):
+        if ADMIN_ROLE_ID not in [r.id for r in interaction.user.roles]:
+            return await interaction.response.send_message("❌ No permission.", ephemeral=True)
+        global user_data, total_food, total_drinks
+        user_data = {}
+        total_food = 0
+        total_drinks = 0
+        await update_panel()
+        await update_leaderboard()
+        await log_action(f"🧹 {interaction.user.mention} reset all data.")
+        await interaction.response.send_message("✅ Data reset.", ephemeral=True)
 
 @bot.event
 async def on_ready():
-    print(f"Bot logged in as {bot.user}")
+    print(f"Bot online as {bot.user}")
     await update_panel()
     await update_leaderboard()
 
